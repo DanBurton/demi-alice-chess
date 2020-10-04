@@ -16,7 +16,10 @@ const [isPlayer, WHITE, BLACK] = makeEnum(players);
 
 const Row = UInt256;
 const rows = 8; // numbered 1 thru 8
-const [isRow, ROW_1, ROW_2, ROW_3, ROW_4, ROW_5, ROW_6, ROW_7, ROW_8] = makeEnum(rows);
+const [isRow,
+  ROW_1, ROW_2, ROW_3, ROW_4,
+  ROW_5, ROW_6, ROW_7, ROW_8,
+] = makeEnum(rows);
 // Beware: row number = n + 1
 
 const Col = UInt256;
@@ -28,12 +31,17 @@ const boards = 2; // lettered A, B
 const [isBoard, BOARD_A, BOARD_B] = makeEnum(boards);
 
 const Pos = Object({
-  row: Row,
-  col: Col,
   board: Board,
+  col: Col,
+  row: Row,
 });
 function isPos(pos) {
   return isRow(pos.row) && isCol(pos.col) && isBoard(pos.board);
+}
+function pos_eq(pos1, pos2) {
+  return pos1.board == pos2.board
+    && pos1.col == pos2.col
+    && pos1.row == pos2.row;
 }
 
 const Piece = UInt256;
@@ -44,6 +52,9 @@ const [isPiece,
   B_KING, B_BISHOP, B_KNIGHT, B_ROOK,
   B_PAWN1, B_PAWN2, B_PAWN3, B_PAWN4,
 ] = makeEnum(pieces);
+function pieceColor(piece) {
+  return piece < (pieces / 2) ? WHITE : BLACK;
+}
 
 const Move = Object({
   piece: Piece,
@@ -90,32 +101,26 @@ const parts = [
   }],
 ];
 
-
-// TODO: change Reach so that deep declassify is default
-function declassifyParams(_params) {
-  const wager = declassify(_params.wager);
-  const delay = declassify(_params.delay);
-  return {wager, delay}
-}
-
 function main_impl(Alice, Bob) {
   Alice.only(() => {
-    const params = declassifyParams(interact.params);
+    // TODO: change Reach so that deep declassify is default
+    const wager = declassify(interact.params.wager);
+    const delay = declassify(interact.params.delay);
     const _randomAlice = interact.random();
-    const [_commitAlice, _saltAlice] = makeCommitment(interact, _randomAlice)
+    const [_commitAlice, _saltAlice] = makeCommitment(interact, _randomAlice);
     const commitAlice = declassify(_commitAlice);
   });
-  Alice.publish(params, commitAlice).pay(params.wager);
+  Alice.publish(wager, delay, commitAlice).pay(wager);
   commit();
 
-  const {wager, delay} = params;
   function win(winner) {
     transfer(2 * wager).to(winner);
     commit();
+    exit();
   }
 
   Bob.only(() => {
-    interact.acceptParams(params);
+    interact.acceptParams({wager, delay});
     const randomBob = declassify(interact.random());
   });
   Bob.publish(randomBob).pay(wager).timeout(delay, () => {
@@ -132,33 +137,63 @@ function main_impl(Alice, Bob) {
   });
   Alice.publish(randomAlice, saltAlice).timeout(delay, () => {
     Bob.publish();
-    transfer(wager * 2).to(Bob);
-    commit();
-    exit();
+    win(Bob);
   });
   checkCommitment(commitAlice, saltAlice, randomAlice);
   // An arbitrary boolean based on the 2 random values provided
   const aliceIsWhite = (randomAlice % 2) == (randomBob % 2);
 
+  function isValidState(state) {
+    return isState(state); // XXX
+  }
 
-  function nextTurn(turn) {
-    if (turn == WHITE) {
-      return BLACK;
-    } else {
-      return WHITE;
-    }
+  function rawNextTurn(state0) {
+    require(isValidState(state0));
+    const state1 = {
+      ...state0,
+      turn: state0.turn == WHITE ? BLACK : WHITE,
+    };
+    assert(isValidState(state1));
+    return state1;
+  }
+
+  function rawKillPieceAt(state0, pos) {
+    require(isValidState(state0));
+    const pieces1 = Array.map(state0.pieces, (ppos) => {
+      if (pos_eq(ppos.pos, pos)) {
+        return {...ppos, pieceStatus: DEAD};
+      } else {
+        return ppos;
+      }
+    });
+    const state1 = {
+      ...state0,
+      pieces: pieces1,
+    };
+    assert(isValidState(state1));
+    return state1;
+  }
+
+  function rawPlacePiece(state0, move) {
+    require(isValidState(state0));
+    const pieces0 = state0.pieces;
+    const ppos0 = pieces0[move.piece];
+    const ppos1 = { ...ppos0, pos: move.to };
+    const pieces1 = Array.set(pieces0, move.piece, ppos1);
+    const state1 = {
+      ...state0,
+      pieces: pieces1,
+    };
+    assert(isValidState(state1));
+    return state1;
   }
 
   function isValidMove(move, state) {
     return true; // XXX
   }
 
-  function validMoves(state) {
-    return 0; // XXX
-  }
-
-  function isValidState(state) {
-    return isState(state); // XXX
+  function hasValidMoves(state) {
+    return false; // XXX
   }
 
   function isAliceTurn(turn) {
@@ -172,14 +207,20 @@ function main_impl(Alice, Bob) {
     return move;
   }
 
-  function doMove(move, state) {
-    return state; // XXX
+  function doMove(move, state0) {
+    require(isValidState(state0));
+    require(isValidMove(move, state0));
+    const state1 = rawKillPieceAt(state0, move.to);
+    const state2 = rawPlacePiece(state1, move);
+    const state3 = rawNextTurn(state2);
+    assert(isValidState(state3));
+    return state3;
   }
 
   // conveniences for positions on board a
   const p = (col, row) => ({
     pieceStatus: ALIVE,
-    pos: { board: BOARD_A, col, row, },
+    pos: { board: BOARD_A, col, row },
   });
   const p1 = (col) => p(col, ROW_1);
   const p2 = (col) => p(col, ROW_2);
@@ -204,7 +245,10 @@ function main_impl(Alice, Bob) {
     if (isAliceTurn(state.turn)) {
       commit();
       Alice.only(() => { const move = getMove(interact, state); });
-      Alice.publish(move);
+      Alice.publish(move).timeout(delay, () => {
+        Bob.publish();
+        win(Bob);
+      });
       require(isValidMove(move, state));
       const newState = doMove(move, state);
       require(isValidState(newState));
@@ -212,7 +256,10 @@ function main_impl(Alice, Bob) {
     } else {
       commit();
       Bob.only(() => { const move = getMove(interact, state); });
-      Bob.publish(move);
+      Bob.publish(move).timeout(delay, () => {
+        Alice.publish();
+        win(Alice);
+      });
       require(isValidMove(move, state));
       const newState = doMove(move, state);
       require(isValidState(newState));
@@ -222,7 +269,7 @@ function main_impl(Alice, Bob) {
 
   var [ state ] = [ initState ];
   invariant(isState(state) && isValidState(state));
-  while (validMoves(state) > 0) {
+  while (hasValidMoves(state)) {
     state = takeTurn(state);
     continue;
   }
@@ -233,7 +280,6 @@ function main_impl(Alice, Bob) {
   } else {
     win(Alice);
   }
-  exit();
 }
 
 export const main = Reach.App(opts, parts, (Alice, Bob) => {
