@@ -61,7 +61,7 @@ const Move = Object({
   to: Pos,
 });
 function isMove(move) {
-  return isPiece(move.piece) && isPos(to);
+  return isPiece(move.piece) && isPos(move.to);
 }
 
 const PieceStatus = UInt256;
@@ -144,21 +144,21 @@ function main_impl(Alice, Bob) {
   const aliceIsWhite = (randomAlice % 2) == (randomBob % 2);
 
   function isValidState(state) {
-    return isState(state); // XXX
+    return isState(state) && true; // XXX
   }
 
   function rawNextTurn(state0) {
-    require(isValidState(state0));
+    // assert(isValidState(state0));
     const state1 = {
       ...state0,
       turn: state0.turn == WHITE ? BLACK : WHITE,
     };
-    assert(isValidState(state1));
+    // assert(isValidState(state1));
     return state1;
   }
 
   function rawKillPieceAt(state0, pos) {
-    require(isValidState(state0));
+    // assert(isValidState(state0));
     const pieces1 = Array.map(state0.pieces, (ppos) => {
       if (pos_eq(ppos.pos, pos)) {
         return {...ppos, pieceStatus: DEAD};
@@ -170,12 +170,17 @@ function main_impl(Alice, Bob) {
       ...state0,
       pieces: pieces1,
     };
-    assert(isValidState(state1));
+    // assert(isValidState(state1));
     return state1;
   }
 
+  function isValidMove(move, state) {
+    return isMove(move) && isState(state) && true; // XXX
+  }
+
   function rawPlacePiece(state0, move) {
-    require(isValidState(state0));
+    // assert(isValidState(state0));
+    // assert(isValidMove(move, state0));
     const pieces0 = state0.pieces;
     const ppos0 = pieces0[move.piece];
     const ppos1 = { ...ppos0, pos: move.to };
@@ -184,16 +189,12 @@ function main_impl(Alice, Bob) {
       ...state0,
       pieces: pieces1,
     };
-    assert(isValidState(state1));
+    // assert(isValidState(state1));
     return state1;
   }
 
-  function isValidMove(move, state) {
-    return true; // XXX
-  }
-
   function hasValidMoves(state) {
-    return false; // XXX
+    return state.turn != BLACK; // XXX
   }
 
   function isAliceTurn(turn) {
@@ -208,12 +209,12 @@ function main_impl(Alice, Bob) {
   }
 
   function doMove(move, state0) {
-    require(isValidState(state0));
-    require(isValidMove(move, state0));
+    // assert(isValidState(state0));
+    // assert(isValidMove(move, state0));
     const state1 = rawKillPieceAt(state0, move.to);
     const state2 = rawPlacePiece(state1, move);
     const state3 = rawNextTurn(state2);
-    assert(isValidState(state3));
+    // assert(isValidState(state3));
     return state3;
   }
 
@@ -240,7 +241,10 @@ function main_impl(Alice, Bob) {
       p7(COL_A), p7(COL_B), p7(COL_C), p7(COL_D),
     ]),
   };
+  assert(isValidState(initState));
+
   function takeTurn(state) {
+    // assert(isValidState(state));
     // TODO: reduce duplication
     if (isAliceTurn(state.turn)) {
       commit();
@@ -251,7 +255,7 @@ function main_impl(Alice, Bob) {
       });
       require(isValidMove(move, state));
       const newState = doMove(move, state);
-      require(isValidState(newState));
+      // assert(isValidState(newState));
       return newState;
     } else {
       commit();
@@ -262,13 +266,14 @@ function main_impl(Alice, Bob) {
       });
       require(isValidMove(move, state));
       const newState = doMove(move, state);
-      require(isValidState(newState));
+      // assert(isValidState(newState));
       return newState;
     }
   }
 
+  // invariant(isValidState(state));
   var [ state ] = [ initState ];
-  invariant(isState(state) && isValidState(state));
+  invariant(true);
   while (hasValidMoves(state)) {
     state = takeTurn(state);
     continue;
